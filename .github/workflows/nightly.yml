@@ -1,0 +1,136 @@
+name: Nightly QA Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_ref:
+        description: App git ref to build
+        required: false
+        default: main
+  schedule:
+    - cron: "0 2 * * *"
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  ECR_REPO: ${{ secrets.ECR_REPO }}
+  QA_HOST: ${{ secrets.QA_HOST }}
+  QA_SSH_USER: ${{ secrets.QA_SSH_USER }}
+  APP_REPOSITORY: ${{ format('{0}/furry-dating-app', github.repository_owner) }}
+  APP_REF: ${{ github.event.inputs.app_ref || 'main' }}
+  TEMP_INSTANCE_AMI_ID: ${{ vars.TEMP_INSTANCE_AMI_ID }}
+  TEMP_INSTANCE_TYPE: ${{ vars.TEMP_INSTANCE_TYPE || 't3.small' }}
+  TEMP_INSTANCE_SUBNET_ID: ${{ vars.TEMP_INSTANCE_SUBNET_ID }}
+  TEMP_INSTANCE_SECURITY_GROUP_ID: ${{ vars.TEMP_INSTANCE_SECURITY_GROUP_ID }}
+  TEMP_INSTANCE_PROFILE_NAME: ${{ vars.TEMP_INSTANCE_PROFILE_NAME }}
+
+jobs:
+  build_push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.image.outputs.tag }}
+    steps:
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.APP_REPOSITORY }}
+          ref: ${{ env.APP_REF }}
+          path: app
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve image tag
+        id: image
+        run: echo "tag=nightly-${GITHUB_RUN_ID}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push image
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: ./scripts/build-and-push-image.sh
+
+  smoke_test:
+    runs-on: ubuntu-latest
+    needs: build_push
+    steps:
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Provision temporary EC2
+        id: temp
+        run: ./scripts/provision-temp-ec2.sh
+
+      - name: Smoke test pushed image
+        env:
+          IMAGE_TAG: ${{ needs.build_push.outputs.image_tag }}
+          SMOKE_HOST: ${{ steps.temp.outputs.public_ip }}
+          SMOKE_SSH_KEY_PATH: ${{ steps.temp.outputs.key_path }}
+        run: ./scripts/run-smoke-tests.sh
+
+      - name: Terminate temporary EC2
+        if: always()
+        env:
+          TEMP_INSTANCE_ID: ${{ steps.temp.outputs.instance_id }}
+        run: |
+          if [ -n "${TEMP_INSTANCE_ID:-}" ]; then
+            aws ec2 terminate-instances --region "${AWS_REGION}" --instance-ids "${TEMP_INSTANCE_ID}" >/dev/null
+            aws ec2 wait instance-terminated --region "${AWS_REGION}" --instance-ids "${TEMP_INSTANCE_ID}"
+          fi
+
+      - name: Delete temporary key pair
+        if: always()
+        env:
+          TEMP_KEY_NAME: ${{ steps.temp.outputs.key_name }}
+          TEMP_KEY_PATH: ${{ steps.temp.outputs.key_path }}
+        run: |
+          if [ -n "${TEMP_KEY_NAME:-}" ]; then
+            aws ec2 delete-key-pair --region "${AWS_REGION}" --key-name "${TEMP_KEY_NAME}" || true
+          fi
+          rm -f "${TEMP_KEY_PATH:-}"
+
+  deploy_to_qa:
+    runs-on: ubuntu-latest
+    needs:
+      - build_push
+      - smoke_test
+    steps:
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Write SSH key
+        run: |
+          install -m 600 /dev/null "${RUNNER_TEMP}/qa.pem"
+          printf '%s\n' "${{ secrets.QA_SSH_PRIVATE_KEY }}" > "${RUNNER_TEMP}/qa.pem"
+
+      - name: Deploy to QA
+        env:
+          IMAGE_TAG: ${{ needs.build_push.outputs.image_tag }}
+          TARGET_HOST: ${{ env.QA_HOST }}
+          TARGET_SSH_USER: ${{ env.QA_SSH_USER }}
+          TARGET_SSH_KEY_PATH: ${{ runner.temp }}/qa.pem
+          QA_APP_ENV: ${{ secrets.QA_APP_ENV }}
+        run: ./scripts/deploy-to-ec2.sh

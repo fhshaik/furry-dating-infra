@@ -1,0 +1,46 @@
+name: Manual QA Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Existing ECR image tag to deploy
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  ECR_REPO: ${{ secrets.ECR_REPO }}
+  QA_HOST: ${{ secrets.QA_HOST }}
+  QA_SSH_USER: ${{ secrets.QA_SSH_USER }}
+
+jobs:
+  deploy_to_qa:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Write SSH key
+        run: |
+          install -m 600 /dev/null "${RUNNER_TEMP}/qa.pem"
+          printf '%s\n' "${{ secrets.QA_SSH_PRIVATE_KEY }}" > "${RUNNER_TEMP}/qa.pem"
+
+      - name: Deploy selected image
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+          TARGET_HOST: ${{ env.QA_HOST }}
+          TARGET_SSH_USER: ${{ env.QA_SSH_USER }}
+          TARGET_SSH_KEY_PATH: ${{ runner.temp }}/qa.pem
+          QA_APP_ENV: ${{ secrets.QA_APP_ENV }}
+        run: ./scripts/deploy-to-ec2.sh

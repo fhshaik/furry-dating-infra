@@ -1,0 +1,49 @@
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /workspace/frontend
+
+COPY app/frontend/package*.json ./
+RUN npm ci
+
+COPY app/frontend/ ./
+ENV VITE_API_BASE_URL=/api
+RUN npm run build
+
+FROM python:3.12-slim AS backend-builder
+
+WORKDIR /workspace/backend
+
+COPY app/backend/requirements.txt ./
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+COPY app/backend/ ./
+
+FROM python:3.12-slim AS runtime
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends nginx supervisor curl \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -r appuser && useradd -r -g appuser -d /home/appuser -m -s /usr/sbin/nologin appuser
+
+WORKDIR /app
+
+COPY --from=backend-builder /root/.local /home/appuser/.local
+COPY --from=backend-builder /workspace/backend /app/backend
+COPY --from=frontend-builder /workspace/frontend/dist /usr/share/nginx/html
+COPY templates/nginx.bundle.conf /etc/nginx/conf.d/default.conf
+COPY templates/supervisord.bundle.conf /etc/supervisor/conf.d/fur-connect.conf
+COPY templates/entrypoint.bundle.sh /entrypoint.sh
+
+RUN chmod +x /entrypoint.sh \
+  && chown -R appuser:appuser /app/backend /home/appuser /usr/share/nginx/html
+
+ENV HOME=/home/appuser
+ENV PATH=/home/appuser/.local/bin:$PATH
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=5 \
+  CMD curl -fsS http://127.0.0.1/health >/dev/null && curl -fsS http://127.0.0.1/api/health >/dev/null || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]
