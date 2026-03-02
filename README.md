@@ -14,6 +14,7 @@ Infrastructure automation for FurConnect nightly CI/CD to AWS EC2.
 
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
+- `AWS_SESSION_TOKEN`
 - `AWS_REGION`
 - `AWS_ACCOUNT_ID`
 - `ECR_REPO`
