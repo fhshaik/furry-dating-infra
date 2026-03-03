@@ -51,6 +51,7 @@ sudo docker pull "${IMAGE_URI}"
 sudo docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 sudo docker run -d \
   --name "${CONTAINER_NAME}" \
+      --add-host=host.docker.internal:host-gateway \
   --restart unless-stopped \
   --env-file "${REMOTE_ENV_FILE}" \
   -p "${CONTAINER_PORT_BIND}" \
