@@ -48,6 +48,8 @@ fi
 sudo systemctl enable --now docker
 aws ecr get-login-password --region "${AWS_REGION}" | sudo docker login --username AWS --password-stdin "$(printf '%s' "${IMAGE_URI}" | cut -d/ -f1)"
 sudo docker pull "${IMAGE_URI}"
+echo "--- Ensuring MySQL database exists ---"
+sudo docker run --rm --env-file "${REMOTE_ENV_FILE}" --entrypoint python3 "${IMAGE_URI}" -c "import pymysql,os,sys; h=os.environ.get('MYSQL_HOST'); u=os.environ.get('MYSQL_USER'); p=os.environ.get('MYSQL_PASSWORD'); port=int(os.environ.get('MYSQL_PORT',3306)); db=os.environ.get('MYSQL_DATABASE','furconnect'); conn=pymysql.connect(host=h,user=u,password=p,port=port,connect_timeout=10); conn.cursor().execute('CREATE DATABASE IF NOT EXISTS ' + db + ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'); conn.commit(); conn.close(); print('DB ' + db + ' ready')"
 sudo docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 sudo docker run -d \
   --name "${CONTAINER_NAME}" \
