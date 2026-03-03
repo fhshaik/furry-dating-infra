@@ -124,6 +124,15 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Resolve QA host IP from instance ID
+        run: |
+          RESOLVED_IP=$(aws ec2 describe-instances \
+            --instance-ids i-0a7aad52a9deef428 \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          echo "QA_HOST=${RESOLVED_IP}" >> "${GITHUB_ENV}"
+          echo "Resolved QA host: ${RESOLVED_IP}"
+
       - name: Write SSH key
         run: |
           install -m 600 /dev/null "${RUNNER_TEMP}/qa.pem"
