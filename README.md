@@ -37,8 +37,7 @@ The temporary-instance security group should expose SSH only from a controlled s
 
 ## Workflows
 
-- [nightly.yml](/Users/faadilshaik/Documents/GitHub/furry-dating-infra/.github/workflows/nightly.yml): nightly build, smoke test, and QA deploy
-- [manual-deploy.yml](/Users/faadilshaik/Documents/GitHub/furry-dating-infra/.github/workflows/manual-deploy.yml): redeploy an existing ECR tag to QA
+- [nightly.yml](.github/workflows/nightly.yml): nightly build, smoke test, and QA deploy
 
 ## QA host expectations
 
