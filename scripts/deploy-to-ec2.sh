@@ -46,6 +46,15 @@ if [ ! -f "${REMOTE_ENV_FILE}" ]; then
 fi
 
 sudo systemctl enable --now docker
+
+# Ensure nginx has WebSocket upgrade headers for /ws/ (idempotent patch)
+NGINX_CONF=/etc/nginx/conf.d/furry-dating.conf
+if [ -f "${NGINX_CONF}" ] && ! grep -q 'location /ws/' "${NGINX_CONF}"; then
+  echo "--- Patching nginx config to add WebSocket support ---"
+  sudo sed -i 's|    location / {|    location /ws/ {\n        proxy_pass http://127.0.0.1:8080;\n        proxy_http_version 1.1;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection "upgrade";\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_read_timeout 86400;\n    }\n\n    location / {|' "${NGINX_CONF}"
+  sudo nginx -t && sudo systemctl reload nginx
+  echo "--- nginx patched and reloaded ---"
+fi
 aws ecr get-login-password --region "${AWS_REGION}" | sudo docker login --username AWS --password-stdin "$(printf '%s' "${IMAGE_URI}" | cut -d/ -f1)"
 sudo docker pull "${IMAGE_URI}"
 echo "--- Ensuring MySQL database exists ---"
