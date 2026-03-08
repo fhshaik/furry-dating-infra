@@ -55,7 +55,7 @@ jobs:
       - name: Build and push RC image
         env:
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
-        run: ./scripts/build-and-push-image.sh
+        run: bash ./scripts/build-and-push-image.sh
 
   deploy_to_rc:
     runs-on: ubuntu-latest
@@ -87,7 +87,7 @@ jobs:
           REMOTE_APP_DIR: /opt/fur-connect
           REMOTE_ENV_FILE: /opt/fur-connect/rc.env
           CONTAINER_NAME: fur-connect-rc
-        run: ./scripts/deploy-to-rc.sh
+        run: bash ./scripts/deploy-to-rc.sh
 
       - name: Print RC URL
         run: echo "RC deployed → https://rc.furconnect.xyz  (v${{ env.RC_VERSION }})"
