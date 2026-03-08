@@ -1,0 +1,93 @@
+name: RC Deploy
+
+on:
+  repository_dispatch:
+    types: [rc-release]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "RC version (e.g. 1.0.0-rc.1)"
+        required: true
+      image_tag:
+        description: "Docker image tag (e.g. v1.0.0-rc.1)"
+        required: true
+      app_ref:
+        description: "App git ref to build from (e.g. v1.0.0-rc.1)"
+        required: false
+        default: "rc"
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  ECR_REPO: ${{ secrets.ECR_REPO }}
+  APP_REPOSITORY: ${{ format('{0}/furry-dating-app', github.repository_owner) }}
+  RC_VERSION: ${{ github.event.client_payload.version || inputs.version }}
+  IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag }}
+  APP_REF: ${{ github.event.client_payload.app_ref || inputs.app_ref || 'rc' }}
+
+jobs:
+  build_push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ env.IMAGE_TAG }}
+    steps:
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+
+      - name: Checkout source repo at RC tag
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.APP_REPOSITORY }}
+          ref: ${{ env.APP_REF }}
+          path: app
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build and push RC image
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        run: ./scripts/build-and-push-image.sh
+
+  deploy_to_rc:
+    runs-on: ubuntu-latest
+    needs: build_push
+    steps:
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Write RC SSH key
+        run: |
+          install -m 600 /dev/null "${RUNNER_TEMP}/rc.pem"
+          printf '%s\n' "${{ secrets.RC_SSH_PRIVATE_KEY }}" > "${RUNNER_TEMP}/rc.pem"
+
+      - name: Deploy to RC
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          TARGET_HOST: ${{ secrets.RC_HOST }}
+          TARGET_SSH_USER: ec2-user
+          TARGET_SSH_KEY_PATH: ${{ runner.temp }}/rc.pem
+          QA_APP_ENV: ${{ secrets.RC_APP_ENV }}
+          REMOTE_APP_DIR: /opt/fur-connect
+          REMOTE_ENV_FILE: /opt/fur-connect/rc.env
+          CONTAINER_NAME: fur-connect-rc
+        run: ./scripts/deploy-to-rc.sh
+
+      - name: Print RC URL
+        run: echo "RC deployed → https://rc.furconnect.xyz  (v${{ env.RC_VERSION }})"
