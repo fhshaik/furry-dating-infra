@@ -31,8 +31,12 @@ if [ -n "${QA_APP_ENV:-}" ]; then
     "cat > '${REMOTE_ENV_FILE}'"
 fi
 
+# Get ECR token on the runner (has AWS creds); pass to remote so it can docker login without AWS CLI
+ECR_TOKEN=$(aws ecr get-login-password --region "${AWS_REGION}")
+ECR_B64=$(printf '%s' "${ECR_TOKEN}" | base64 -w0 2>/dev/null || printf '%s' "${ECR_TOKEN}" | base64)
+
 ssh "${SSH_OPTS[@]}" "${TARGET_SSH_USER}@${TARGET_HOST}" \
-  "IMAGE_URI='${IMAGE_URI}' AWS_REGION='${AWS_REGION}' REMOTE_ENV_FILE='${REMOTE_ENV_FILE}' CONTAINER_NAME='${CONTAINER_NAME}' CONTAINER_PORT_BIND='${CONTAINER_PORT_BIND}' bash -s" <<'EOF'
+  "IMAGE_URI='${IMAGE_URI}' AWS_REGION='${AWS_REGION}' REMOTE_ENV_FILE='${REMOTE_ENV_FILE}' CONTAINER_NAME='${CONTAINER_NAME}' CONTAINER_PORT_BIND='${CONTAINER_PORT_BIND}' ECR_B64='${ECR_B64}' bash -s" <<'EOF'
 set -euo pipefail
 
 sudo systemctl enable --now docker
@@ -43,9 +47,10 @@ if [ -f "${NGINX_CONF}" ] && ! grep -q 'location /ws/' "${NGINX_CONF}"; then
   sudo nginx -t && sudo systemctl reload nginx
 fi
 
-aws ecr get-login-password --region "${AWS_REGION}" \
-  | sudo docker login --username AWS --password-stdin \
-    "$(printf '%s' "${IMAGE_URI}" | cut -d/ -f1)"
+# Use ECR token from runner (remote has no AWS credentials)
+ECR_TOKEN=$(echo "${ECR_B64}" | base64 -d)
+echo "${ECR_TOKEN}" | sudo docker login --username AWS --password-stdin \
+  "$(printf '%s' "${IMAGE_URI}" | cut -d/ -f1)"
 
 sudo docker pull "${IMAGE_URI}"
 sudo docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true

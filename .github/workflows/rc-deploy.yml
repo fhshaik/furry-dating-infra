@@ -24,9 +24,9 @@ env:
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
   ECR_REPO: ${{ secrets.ECR_REPO }}
   APP_REPOSITORY: ${{ format('{0}/furry-dating-app', github.repository_owner) }}
-  RC_VERSION: ${{ github.event.client_payload.version || inputs.version }}
-  IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag }}
-  APP_REF: ${{ github.event.client_payload.app_ref || inputs.app_ref || 'rc' }}
+  RC_VERSION: ${{ github.event.client_payload.version || github.event.inputs.version }}
+  IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.inputs.image_tag }}
+  APP_REF: ${{ github.event.client_payload.app_ref || github.event.inputs.app_ref || 'rc' }}
 
 jobs:
   build_push:
