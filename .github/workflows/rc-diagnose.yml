@@ -1,0 +1,34 @@
+name: RC Diagnose
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write RC SSH key
+        run: |
+          install -m 600 /dev/null "${RUNNER_TEMP}/rc.pem"
+          printf '%s\n' "${{ secrets.RC_SSH_PRIVATE_KEY }}" > "${RUNNER_TEMP}/rc.pem"
+
+      - name: Diagnose RC host
+        env:
+          TARGET_HOST: ${{ secrets.RC_HOST }}
+          TARGET_SSH_KEY_PATH: ${{ runner.temp }}/rc.pem
+        run: |
+          SSH_OPTS="-i ${TARGET_SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+          ssh $SSH_OPTS ec2-user@${TARGET_HOST} bash -s <<'EOF'
+          echo "=== docker ps -a ==="
+          sudo docker ps -a
+          echo "=== Container logs ==="
+          sudo docker logs --tail 200 fur-connect-rc 2>&1 || echo "No container"
+          echo "=== Memory ==="
+          free -h
+          echo "=== Disk ==="
+          df -h /
+          echo "=== OOM check ==="
+          sudo dmesg | grep -i "oom\|killed\|memory" | tail -20 || true
+          echo "=== rc.env (masked) ==="
+          sudo cat /opt/fur-connect/rc.env | sed 's/=.*/=***/' || echo "No rc.env"
+          EOF
