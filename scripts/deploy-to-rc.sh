@@ -41,9 +41,15 @@ set -euo pipefail
 
 sudo systemctl enable --now docker
 
-NGINX_CONF=/etc/nginx/conf.d/furry-dating.conf
-if [ -f "${NGINX_CONF}" ] && ! grep -q 'location /ws/' "${NGINX_CONF}"; then
-  sudo sed -i 's| location / {| location /ws/ {\n proxy_pass http://127.0.0.1:8080;\n proxy_http_version 1.1;\n proxy_set_header Upgrade $http_upgrade;\n proxy_set_header Connection "upgrade";\n proxy_set_header Host $host;\n proxy_read_timeout 86400;\n }\n\n location / {|' "${NGINX_CONF}"
+NGINX_CONF=/etc/nginx/conf.d/furconnect-rc.conf
+if [ -f "${NGINX_CONF}" ]; then
+  # Ensure proxy_pass points to the container port
+  sudo sed -i 's|proxy_pass http://localhost:3000|proxy_pass http://127.0.0.1:8080|g' "${NGINX_CONF}"
+  sudo sed -i 's|proxy_pass http://127.0.0.1:3000|proxy_pass http://127.0.0.1:8080|g' "${NGINX_CONF}"
+  # Add WebSocket location if not already present
+  if ! grep -q 'location /ws/' "${NGINX_CONF}"; then
+    sudo sed -i 's| location / {| location /ws/ {\n proxy_pass http://127.0.0.1:8080;\n proxy_http_version 1.1;\n proxy_set_header Upgrade $http_upgrade;\n proxy_set_header Connection "upgrade";\n proxy_set_header Host $host;\n proxy_read_timeout 86400;\n }\n\n location / {|' "${NGINX_CONF}"
+  fi
   sudo nginx -t && sudo systemctl reload nginx
 fi
 
