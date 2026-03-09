@@ -21,14 +21,15 @@ jobs:
           ssh $SSH_OPTS ec2-user@${TARGET_HOST} bash -s <<'EOF'
           echo "=== docker ps -a ==="
           sudo docker ps -a
-          echo "=== Container logs ==="
-          sudo docker logs --tail 200 fur-connect-rc 2>&1 || echo "No container"
+          echo "=== Container logs (last 20) ==="
+          sudo docker logs --tail 20 fur-connect-rc 2>&1 || echo "No container"
           echo "=== Memory ==="
           free -h
-          echo "=== Disk ==="
-          df -h /
           echo "=== OOM check ==="
-          sudo dmesg | grep -i "oom\|killed\|memory" | tail -20 || true
-          echo "=== rc.env (masked) ==="
+          sudo dmesg | grep -i "oom\|killed process\|out of memory" | tail -10 || true
+          echo "=== rc.env keys (masked) ==="
           sudo cat /opt/fur-connect/rc.env | sed 's/=.*/=***/' || echo "No rc.env"
+          echo "=== Host nginx status ==="
+          sudo systemctl is-active nginx
+          sudo grep -r "proxy_pass\|listen\|server_name" /etc/nginx/conf.d/ 2>/dev/null | head -20
           EOF
