@@ -1,10 +1,10 @@
-name: RC Fix Nginx
+name: RC Env Check
 
 on:
   workflow_dispatch: {}
 
 jobs:
-  fix_nginx:
+  check_env:
     runs-on: ubuntu-latest
     steps:
       - name: Write RC SSH key
@@ -12,25 +12,26 @@ jobs:
           install -m 600 /dev/null "${RUNNER_TEMP}/rc.pem"
           printf '%s\n' "${{ secrets.RC_SSH_PRIVATE_KEY }}" > "${RUNNER_TEMP}/rc.pem"
 
-      - name: Fix nginx proxy_pass port and verify
+      - name: Check RC container env (non-sensitive)
         env:
           TARGET_HOST: ${{ secrets.RC_HOST }}
           TARGET_SSH_KEY_PATH: ${{ runner.temp }}/rc.pem
         run: |
           SSH_OPTS="-i ${TARGET_SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
           ssh $SSH_OPTS ec2-user@${TARGET_HOST} bash -s <<'EOF'
-          echo "=== Before fix ==="
-          sudo grep -r "proxy_pass" /etc/nginx/conf.d/
-          echo "=== Applying fix: port 3000 -> 8080 ==="
-          sudo sed -i 's|proxy_pass http://localhost:3000|proxy_pass http://127.0.0.1:8080|g' /etc/nginx/conf.d/furconnect-rc.conf
-          sudo sed -i 's|proxy_pass http://127.0.0.1:3000|proxy_pass http://127.0.0.1:8080|g' /etc/nginx/conf.d/furconnect-rc.conf
-          echo "=== After fix ==="
-          sudo grep -r "proxy_pass" /etc/nginx/conf.d/
-          echo "=== Testing nginx config ==="
-          sudo nginx -t
-          echo "=== Reloading nginx ==="
-          sudo systemctl reload nginx
-          echo "=== Testing connectivity to container ==="
-          curl -fsS http://127.0.0.1:8080/api/health && echo "Container reachable on 8080!"
+          echo "=== Container running? ==="
+          sudo docker ps --filter name=fur-connect-rc --format "{{.Names}} {{.Status}}"
+
+          echo "=== URL env vars in container ==="
+          sudo docker exec fur-connect-rc sh -c 'echo "FRONTEND_URL=$FRONTEND_URL"'
+          sudo docker exec fur-connect-rc sh -c 'echo "BACKEND_URL=$BACKEND_URL"'
+          sudo docker exec fur-connect-rc sh -c 'echo "ENVIRONMENT=$ENVIRONMENT"'
+
+          echo "=== Google Client ID prefix (first 30 chars) ==="
+          sudo docker exec fur-connect-rc sh -c 'echo "$GOOGLE_CLIENT_ID" | cut -c1-30'
+
+          echo "=== Discord Client ID ==="
+          sudo docker exec fur-connect-rc sh -c 'echo "DISCORD_CLIENT_ID=$DISCORD_CLIENT_ID"'
+
           echo "=== Done ==="
           EOF
