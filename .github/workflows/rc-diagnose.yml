@@ -1,10 +1,10 @@
-name: RC Diagnose
+name: RC Fix Nginx
 
 on:
   workflow_dispatch: {}
 
 jobs:
-  diagnose:
+  fix_nginx:
     runs-on: ubuntu-latest
     steps:
       - name: Write RC SSH key
@@ -12,24 +12,25 @@ jobs:
           install -m 600 /dev/null "${RUNNER_TEMP}/rc.pem"
           printf '%s\n' "${{ secrets.RC_SSH_PRIVATE_KEY }}" > "${RUNNER_TEMP}/rc.pem"
 
-      - name: Diagnose RC host
+      - name: Fix nginx proxy_pass port and verify
         env:
           TARGET_HOST: ${{ secrets.RC_HOST }}
           TARGET_SSH_KEY_PATH: ${{ runner.temp }}/rc.pem
         run: |
           SSH_OPTS="-i ${TARGET_SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
           ssh $SSH_OPTS ec2-user@${TARGET_HOST} bash -s <<'EOF'
-          echo "=== docker ps -a ==="
-          sudo docker ps -a
-          echo "=== Container logs (last 20) ==="
-          sudo docker logs --tail 20 fur-connect-rc 2>&1 || echo "No container"
-          echo "=== Memory ==="
-          free -h
-          echo "=== OOM check ==="
-          sudo dmesg | grep -i "oom\|killed process\|out of memory" | tail -10 || true
-          echo "=== rc.env keys (masked) ==="
-          sudo cat /opt/fur-connect/rc.env | sed 's/=.*/=***/' || echo "No rc.env"
-          echo "=== Host nginx status ==="
-          sudo systemctl is-active nginx
-          sudo grep -r "proxy_pass\|listen\|server_name" /etc/nginx/conf.d/ 2>/dev/null | head -20
+          echo "=== Before fix ==="
+          sudo grep -r "proxy_pass" /etc/nginx/conf.d/
+          echo "=== Applying fix: port 3000 -> 8080 ==="
+          sudo sed -i 's|proxy_pass http://localhost:3000|proxy_pass http://127.0.0.1:8080|g' /etc/nginx/conf.d/furconnect-rc.conf
+          sudo sed -i 's|proxy_pass http://127.0.0.1:3000|proxy_pass http://127.0.0.1:8080|g' /etc/nginx/conf.d/furconnect-rc.conf
+          echo "=== After fix ==="
+          sudo grep -r "proxy_pass" /etc/nginx/conf.d/
+          echo "=== Testing nginx config ==="
+          sudo nginx -t
+          echo "=== Reloading nginx ==="
+          sudo systemctl reload nginx
+          echo "=== Testing connectivity to container ==="
+          curl -fsS http://127.0.0.1:8080/api/health && echo "Container reachable on 8080!"
+          echo "=== Done ==="
           EOF
